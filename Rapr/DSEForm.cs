@@ -50,11 +50,6 @@ namespace Rapr
                 Application.Exit();
             }
 
-            if (!DSEFormHelper.IsRunAsAdmin)
-            {
-                DSEFormHelper.RunAsAdministrator();
-            }
-
             var lang = Settings.Default.Language;
             if (lang != null && !CultureInfo.InvariantCulture.Equals(lang))
             {
@@ -112,10 +107,10 @@ namespace Rapr
             this.driverStore = driverStore;
             this.exportAllDriversToolStripMenuItem.Enabled = driverStore.SupportExportAllDrivers;
             this.exportAllDriversToolStripMenuItem.Visible = driverStore.SupportExportAllDrivers;
-            this.cbAddInstall.Enabled = driverStore.SupportAddInstall;
-            this.cbForceDeletion.Enabled = driverStore.SupportForceDeletion;
+            this.cbAddInstall.Enabled = driverStore.SupportAddInstall && DSEFormHelper.IsRunAsAdmin;
+            this.cbForceDeletion.Enabled = driverStore.SupportForceDeletion && DSEFormHelper.IsRunAsAdmin;
             this.buttonExportDrivers.Visible = driverStore.SupportExportDriver;
-            this.deviceNameColumn.IsVisible = driverStore.SupportForceDeletion;
+            this.deviceNameColumn.IsVisible = driverStore.SupportDeviceNameColumn;
             this.ctxMenuExportDriver.Visible = driverStore.SupportExportDriver;
 
             switch (driverStore.Type)
@@ -129,6 +124,12 @@ namespace Rapr
                 case DriverStoreType.Offline:
                     {
                         this.Text = Language.Product_Name + " - " + driverStore.OfflineStoreLocation;
+                        break;
+                    }
+
+                case DriverStoreType.Remote:
+                    {
+                        this.Text = Language.Product_Name + " - " + Language.DriverStore_RemoteMachine + ": " + driverStore.OfflineStoreLocation;
                         break;
                     }
             }
@@ -839,6 +840,10 @@ namespace Rapr
                 {
                     chooseDriverStore.OfflineStoreLocation = this.driverStore.OfflineStoreLocation;
                 }
+                else if (this.driverStore.Type == DriverStoreType.Remote)
+                {
+                    chooseDriverStore.RemoteComputerName = this.driverStore.OfflineStoreLocation;
+                }
 
                 chooseDriverStore.RightToLeft = this.RightToLeft;
                 chooseDriverStore.RightToLeftLayout = this.RightToLeftLayout;
@@ -855,6 +860,10 @@ namespace Rapr
 
                         case DriverStoreType.Offline:
                             this.UpdateDriverStore(DriverStoreFactory.CreateOfflineDriverStore(chooseDriverStore.OfflineStoreLocation));
+                            break;
+
+                        case DriverStoreType.Remote:
+                            this.UpdateDriverStore(DriverStoreFactory.CreateRemoteDriverStore(chooseDriverStore.RemoteComputerName));
                             break;
                     }
 
@@ -905,9 +914,9 @@ namespace Rapr
             this.toolStripProgressBar1.Visible = false;
             this.lstDriverStoreEntries.Enabled = true;
             this.buttonEnumerate.Enabled = true;
-            this.buttonAddDriver.Enabled = true;
-            this.cbAddInstall.Enabled = this.driverStore.SupportAddInstall;
-            this.buttonDeleteDriver.Enabled = this.lstDriverStoreEntries.CheckedObjects.Count > 0;
+            this.buttonAddDriver.Enabled = this.driverStore.Type != DriverStoreType.Remote && DSEFormHelper.IsRunAsAdmin;
+            this.cbAddInstall.Enabled = this.driverStore.SupportAddInstall && DSEFormHelper.IsRunAsAdmin;
+            this.buttonDeleteDriver.Enabled = this.driverStore.Type != DriverStoreType.Remote && DSEFormHelper.IsRunAsAdmin && this.lstDriverStoreEntries.CheckedObjects.Count > 0;
             this.cbForceDeletion.Enabled = this.buttonDeleteDriver.Enabled && this.driverStore.SupportForceDeletion;
             this.buttonSelectOldDrivers.Enabled = true;
             this.buttonExportDrivers.Enabled = true;
