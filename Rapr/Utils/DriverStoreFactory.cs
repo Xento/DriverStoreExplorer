@@ -18,5 +18,10 @@
         {
             return new DismUtil(imagePath);
         }
+
+        public static IDriverStore CreateRemoteDriverStore(string computerName)
+        {
+            return new RemoteDriverStore(computerName);
+        }
     }
 }
