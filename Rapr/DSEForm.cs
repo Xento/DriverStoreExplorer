@@ -102,22 +102,28 @@ namespace Rapr
             base.Dispose(disposing);
         }
 
+        private bool CanModifyCurrentDriverStore()
+        {
+            return this.driverStore != null
+                && (this.driverStore.Type == DriverStoreType.Remote || DSEFormHelper.IsRunAsAdmin);
+        }
+
         private void UpdateDriverStore(IDriverStore driverStore)
         {
             this.driverStore = driverStore;
             this.exportAllDriversToolStripMenuItem.Enabled = driverStore.SupportExportAllDrivers;
             this.exportAllDriversToolStripMenuItem.Visible = driverStore.SupportExportAllDrivers;
-            this.cbAddInstall.Enabled = driverStore.SupportAddInstall && DSEFormHelper.IsRunAsAdmin;
-            this.cbForceDeletion.Enabled = driverStore.SupportForceDeletion && DSEFormHelper.IsRunAsAdmin;
+            this.cbAddInstall.Enabled = driverStore.SupportAddInstall && this.CanModifyCurrentDriverStore();
+            this.cbForceDeletion.Enabled = driverStore.SupportForceDeletion && this.CanModifyCurrentDriverStore();
             this.buttonExportDrivers.Visible = driverStore.SupportExportDriver;
             this.deviceNameColumn.IsVisible = driverStore.SupportDeviceNameColumn;
             this.ctxMenuExportDriver.Visible = driverStore.SupportExportDriver;
 
-            bool allowLocalChanges = driverStore.Type != DriverStoreType.Remote && DSEFormHelper.IsRunAsAdmin;
-            this.lstDriverStoreEntries.CheckBoxes = allowLocalChanges;
-            this.buttonAddDriver.Enabled = allowLocalChanges;
+            bool allowChanges = this.CanModifyCurrentDriverStore();
+            this.lstDriverStoreEntries.CheckBoxes = allowChanges;
+            this.buttonAddDriver.Enabled = allowChanges;
             this.buttonDeleteDriver.Enabled = false;
-            this.ctxMenuDelete.Enabled = allowLocalChanges;
+            this.ctxMenuDelete.Enabled = allowChanges;
 
             switch (driverStore.Type)
             {
@@ -513,7 +519,7 @@ namespace Rapr
 
                 if (this.lstDriverStoreEntries.SelectedObjects?.Count > 0)
                 {
-                    this.ctxMenuDelete.Enabled = true;
+                    this.ctxMenuDelete.Enabled = this.CanModifyCurrentDriverStore();
 
                     if (this.lstDriverStoreEntries.CheckedObjects?.Count > 0
                         && this.lstDriverStoreEntries
@@ -530,7 +536,8 @@ namespace Rapr
 
                     this.ctxMenuSelect.Enabled = true;
 
-                    this.ctxMenuOpenFolder.Enabled = this.lstDriverStoreEntries.SelectedObjects.Count == 1;
+                    this.ctxMenuOpenFolder.Enabled = this.driverStore.Type != DriverStoreType.Remote
+                        && this.lstDriverStoreEntries.SelectedObjects.Count == 1;
                 }
                 else
                 {
@@ -815,8 +822,9 @@ namespace Rapr
                 this.ShowStatus(Status.Normal, Language.Status_No_Drivers_Selected);
             }
 
-            this.buttonDeleteDriver.Enabled = this.lstDriverStoreEntries.CheckedObjects.Count > 0;
-            this.cbForceDeletion.Enabled = this.buttonDeleteDriver.Enabled;
+            this.buttonDeleteDriver.Enabled = this.CanModifyCurrentDriverStore()
+                && this.lstDriverStoreEntries.CheckedObjects.Count > 0;
+            this.cbForceDeletion.Enabled = this.buttonDeleteDriver.Enabled && this.driverStore.SupportForceDeletion;
         }
 
         private void UpdateColumnSize()
@@ -920,15 +928,16 @@ namespace Rapr
             this.toolStripProgressBar1.Visible = false;
             this.lstDriverStoreEntries.Enabled = true;
             this.buttonEnumerate.Enabled = true;
-            this.buttonAddDriver.Enabled = this.driverStore.Type != DriverStoreType.Remote && DSEFormHelper.IsRunAsAdmin;
-            this.cbAddInstall.Enabled = this.driverStore.SupportAddInstall && DSEFormHelper.IsRunAsAdmin;
-            this.buttonDeleteDriver.Enabled = this.driverStore.Type != DriverStoreType.Remote && DSEFormHelper.IsRunAsAdmin && this.lstDriverStoreEntries.CheckedObjects.Count > 0;
+            this.buttonAddDriver.Enabled = this.CanModifyCurrentDriverStore();
+            this.cbAddInstall.Enabled = this.driverStore.SupportAddInstall && this.CanModifyCurrentDriverStore();
+            this.buttonDeleteDriver.Enabled = this.CanModifyCurrentDriverStore()
+                && this.lstDriverStoreEntries.CheckedObjects.Count > 0;
             this.cbForceDeletion.Enabled = this.buttonDeleteDriver.Enabled && this.driverStore.SupportForceDeletion;
             this.buttonSelectOldDrivers.Enabled = true;
             this.buttonExportDrivers.Enabled = true;
             this.chooseDriverStoreToolStripMenuItem.Enabled = true;
             this.exportToolStripMenuItem.Enabled = true;
-            this.exportAllDriversToolStripMenuItem.Enabled = true;
+            this.exportAllDriversToolStripMenuItem.Enabled = this.driverStore.SupportExportAllDrivers;
             this.languageToolStripMenuItem.Enabled = true;
         }
 
