@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 
 using Newtonsoft.Json;
 
@@ -136,7 +139,7 @@ finally {
 }
 ";
 
-            this.RunPowerShell(script);
+            this.RunPowerShell(script, "DeleteDriver " + driverStoreEntry.DriverPublishedName);
             return true;
         }
 
@@ -214,7 +217,9 @@ finally {
 }
 ";
 
-            this.RunPowerShell(script);
+            this.RunPowerShell(
+                script,
+                "AddDriver " + infFileName + (install ? " (install)" : string.Empty));
             return true;
         }
 
@@ -265,7 +270,7 @@ finally {
 }
 ";
 
-            this.RunPowerShell(script);
+            this.RunPowerShell(script, "ExportAllDrivers");
             return true;
         }
 
@@ -381,7 +386,7 @@ finally {
 }
 ";
 
-            return this.RunPowerShell(script).Trim();
+            return this.RunPowerShell(script, "EnumeratePackages").Trim();
         }
 
         private string CreateSessionPrefix()
@@ -408,7 +413,7 @@ Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
 ";
         }
 
-        private string RunPowerShell(string script)
+        private string RunPowerShell(string script, string operation)
         {
             string encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
 
@@ -425,7 +430,11 @@ Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
                 StandardErrorEncoding = Encoding.UTF8,
             };
 
-            Trace.TraceInformation($"Executing remote driver store operation on {this.ComputerName}");
+            string operationName = string.IsNullOrWhiteSpace(operation) ? "RemoteOperation" : operation;
+            Stopwatch stopwatch = Stopwatch.StartNew();
+
+            Trace.TraceInformation(
+                $"[RemoteDriverStore] START Operation={operationName}; Computer={this.ComputerName}");
 
             try
             {
@@ -439,15 +448,53 @@ Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
                     string output = process.StandardOutput.ReadToEnd();
                     string error = process.StandardError.ReadToEnd();
                     process.WaitForExit();
+                    stopwatch.Stop();
+
+                    Trace.TraceInformation(
+                        $"[RemoteDriverStore] END Operation={operationName}; Computer={this.ComputerName}; ExitCode={process.ExitCode}; DurationMs={stopwatch.ElapsedMilliseconds}");
 
                     if (process.ExitCode != 0)
                     {
-                        string detail = string.IsNullOrWhiteSpace(error)
-                            ? $"PowerShell exited with code {process.ExitCode}."
-                            : error.Trim();
+                        string readableError = GetReadablePowerShellError(error);
+
+                        Trace.TraceError(
+                            $"[RemoteDriverStore] FAILED Operation={operationName}; Computer={this.ComputerName}; ExitCode={process.ExitCode}");
+
+                        if (!string.IsNullOrWhiteSpace(readableError))
+                        {
+                            Trace.TraceError(
+                                $"[RemoteDriverStore] PowerShell error:{Environment.NewLine}{readableError}");
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(output))
+                        {
+                            Trace.TraceError(
+                                $"[RemoteDriverStore] STDOUT (raw):{Environment.NewLine}{output.Trim()}");
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(error))
+                        {
+                            Trace.TraceError(
+                                $"[RemoteDriverStore] STDERR/CLIXML (raw):{Environment.NewLine}{error.Trim()}");
+                        }
+
+                        string detail = !string.IsNullOrWhiteSpace(readableError)
+                            ? readableError
+                            : !string.IsNullOrWhiteSpace(error)
+                                ? "PowerShell returned an error. See the application log for the complete STDERR/CLIXML output."
+                                : $"PowerShell exited with code {process.ExitCode}.";
 
                         throw new InvalidOperationException(
-                            $"Remote operation on '{this.ComputerName}' failed. {detail}");
+                            $"Remote operation '{operationName}' on '{this.ComputerName}' failed.{Environment.NewLine}{detail}");
+                    }
+
+                    // Native Windows PowerShell can emit progress CLIXML to STDERR even when
+                    // the command itself succeeds. Keep it in the trace for diagnostics, but
+                    // never surface it as a UI error on a successful operation.
+                    if (!string.IsNullOrWhiteSpace(error))
+                    {
+                        Trace.TraceInformation(
+                            $"[RemoteDriverStore] STDERR/CLIXML on successful operation:{Environment.NewLine}{error.Trim()}");
                     }
 
                     return output;
@@ -458,9 +505,69 @@ Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
                 || ex is InvalidOperationException
                 || ex is System.ComponentModel.Win32Exception)
             {
-                Trace.TraceError(ex.ToString());
+                if (stopwatch.IsRunning)
+                {
+                    stopwatch.Stop();
+                }
+
+                Trace.TraceError(
+                    $"[RemoteDriverStore] EXCEPTION Operation={operationName}; Computer={this.ComputerName}; DurationMs={stopwatch.ElapsedMilliseconds}{Environment.NewLine}{ex}");
                 throw;
             }
+        }
+
+        private static string GetReadablePowerShellError(string error)
+        {
+            if (string.IsNullOrWhiteSpace(error))
+            {
+                return null;
+            }
+
+            string trimmed = error.Trim();
+
+            try
+            {
+                int xmlStart = trimmed.IndexOf("<Objs", StringComparison.Ordinal);
+                if (xmlStart >= 0)
+                {
+                    XDocument document = XDocument.Parse(trimmed.Substring(xmlStart));
+
+                    string[] messages = document
+                        .Descendants()
+                        .Where(element =>
+                            string.Equals(element.Name.LocalName, "S", StringComparison.Ordinal)
+                            && string.Equals((string)element.Attribute("S"), "Error", StringComparison.OrdinalIgnoreCase))
+                        .Select(element => DecodeCliXmlString(element.Value))
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .Distinct()
+                        .ToArray();
+
+                    if (messages.Length > 0)
+                    {
+                        return string.Join(Environment.NewLine, messages).Trim();
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is System.Xml.XmlException || ex is InvalidOperationException)
+            {
+                Trace.TraceWarning(
+                    $"[RemoteDriverStore] Could not decode PowerShell CLIXML error: {ex.Message}");
+            }
+
+            return DecodeCliXmlString(trimmed);
+        }
+
+        private static string DecodeCliXmlString(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return value;
+            }
+
+            return Regex.Replace(
+                value,
+                "_x([0-9A-Fa-f]{4})_",
+                match => ((char)Convert.ToInt32(match.Groups[1].Value, 16)).ToString());
         }
 
         private static string EscapePowerShellSingleQuotedString(string value)
