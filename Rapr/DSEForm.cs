@@ -113,6 +113,12 @@ namespace Rapr
             this.deviceNameColumn.IsVisible = driverStore.SupportDeviceNameColumn;
             this.ctxMenuExportDriver.Visible = driverStore.SupportExportDriver;
 
+            bool allowLocalChanges = driverStore.Type != DriverStoreType.Remote && DSEFormHelper.IsRunAsAdmin;
+            this.lstDriverStoreEntries.CheckBoxes = allowLocalChanges;
+            this.buttonAddDriver.Enabled = allowLocalChanges;
+            this.buttonDeleteDriver.Enabled = false;
+            this.ctxMenuDelete.Enabled = allowLocalChanges;
+
             switch (driverStore.Type)
             {
                 case DriverStoreType.Online:
