@@ -37,7 +37,7 @@ namespace Rapr
         private const long RefreshTime = Timeout.Infinite;
         private const long Delay = 100;
 
-        public DSEForm()
+        public DSEForm(string remoteComputerName = null)
         {
             if (!DSEFormHelper.IsOSSupported)
             {
@@ -75,7 +75,14 @@ namespace Rapr
             Trace.TraceInformation("---------------------------------------------------------------");
             Trace.TraceInformation($"{Application.ProductName} started");
 
-            this.UpdateDriverStore(DriverStoreFactory.CreateOnlineDriverStore());
+            if (string.IsNullOrWhiteSpace(remoteComputerName))
+            {
+                this.UpdateDriverStore(DriverStoreFactory.CreateOnlineDriverStore());
+            }
+            else
+            {
+                this.UpdateDriverStore(DriverStoreFactory.CreateRemoteDriverStore(remoteComputerName));
+            }
 
             this.UpdateCheckedItemSizeTimer = new Timer(x => this.BeginInvoke((Action)(() => this.UpdateCheckedItemSize())));
         }
