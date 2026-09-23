@@ -109,8 +109,6 @@ namespace Rapr.Utils
             }
 
             string publishedName = EscapePowerShellSingleQuotedString(driverStoreEntry.DriverPublishedName);
-            string forceArgument = forceDelete ? " /uninstall /force" : string.Empty;
-
             string script = this.CreateSessionPrefix() + @"
 try {
     Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
@@ -120,7 +118,6 @@ try {
 
         $arguments = @('/delete-driver', $publishedName)
         if ($force) {
-            $arguments += '/uninstall'
             $arguments += '/force'
         }
 
