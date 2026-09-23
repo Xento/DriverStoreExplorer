@@ -176,8 +176,9 @@ try {
     }
 
     $sourceFolder = '" + escapedSourceFolder + @"'
-    Get-ChildItem -LiteralPath $sourceFolder -Force -ErrorAction Stop |
-        Copy-Item -Destination $remoteStage -ToSession $session -Recurse -Force -ErrorAction Stop
+    Get-ChildItem -LiteralPath $sourceFolder -Force -ErrorAction Stop | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $remoteStage -ToSession $session -Recurse -Force -ErrorAction Stop
+    }
 
     Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
         param($stage, $infFileName, $install)
@@ -251,8 +252,7 @@ try {
     }
 
     $destination = '" + escapedDestination + @"'
-    Get-ChildItem -Path (Join-Path $remoteStage '*') -FromSession $session -Force -ErrorAction Stop |
-        Copy-Item -Destination $destination -Recurse -Force -ErrorAction Stop
+    Copy-Item -Path (Join-Path $remoteStage '*') -Destination $destination -FromSession $session -Recurse -Force -ErrorAction Stop
 }
 finally {
     if ($session) {
@@ -395,17 +395,19 @@ finally {
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 
-function Assert-RemoteAdministrator {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw 'The PowerShell remoting session does not have administrator rights on the target computer.'
-    }
-}
-
 $session = $null
 $session = New-PSSession -ComputerName '" + escapedComputerName + @"' -ErrorAction Stop
+
+Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+    function global:Assert-RemoteAdministrator {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+
+        if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw 'The PowerShell remoting session does not have administrator rights on the target computer.'
+        }
+    }
+} | Out-Null
 ";
         }
 
