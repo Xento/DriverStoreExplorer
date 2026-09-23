@@ -330,6 +330,9 @@ License:
   <data name="DriverStore_LocalMachine" xml:space="preserve">
     <value>Local Machine</value>
   </data>
+  <data name="DriverStore_RemoteMachine" xml:space="preserve">
+    <value>Remote Computer</value>
+  </data>
   <data name="Menu_File_Choose_Driver_Store" xml:space="preserve">
     <value>&amp;Choose Driver Store</value>
   </data>
