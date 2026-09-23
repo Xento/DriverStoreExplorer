@@ -60,11 +60,55 @@ namespace Rapr
             }
         }
 
+        private static string GetRemoteComputerName(string[] args)
+        {
+            if (args == null || args.Length == 0)
+            {
+                return null;
+            }
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                string argument = args[i];
+
+                if (string.IsNullOrWhiteSpace(argument))
+                {
+                    continue;
+                }
+
+                if (argument.StartsWith("--computer=", StringComparison.OrdinalIgnoreCase))
+                {
+                    return argument.Substring("--computer=".Length).Trim();
+                }
+
+                if (argument.StartsWith("/computer:", StringComparison.OrdinalIgnoreCase))
+                {
+                    return argument.Substring("/computer:".Length).Trim();
+                }
+
+                if (string.Equals(argument, "--computer", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(argument, "-computer", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(argument, "/computer", StringComparison.OrdinalIgnoreCase))
+                {
+                    return i + 1 < args.Length ? args[i + 1]?.Trim() : null;
+                }
+
+                // Backward-compatible/simple form: Rapr.exe RQ101003
+                if (!argument.StartsWith("-", StringComparison.Ordinal)
+                    && !argument.StartsWith("/", StringComparison.Ordinal))
+                {
+                    return argument.Trim();
+                }
+            }
+
+            return null;
+        }
+
         /// <summary>
         /// The main entry point for the application.
         /// </summary>
         [STAThread]
-        public static void Main()
+        public static void Main(string[] args)
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -96,7 +140,9 @@ namespace Rapr
                     }
                 }
 
-                using (DSEForm mainForm = new DSEForm())
+                string remoteComputerName = GetRemoteComputerName(args);
+
+                using (DSEForm mainForm = new DSEForm(remoteComputerName))
                 {
                     Application.Run(mainForm);
                 }
