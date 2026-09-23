@@ -4,5 +4,6 @@
     {
         Online,
         Offline,
+        Remote,
     }
 }
