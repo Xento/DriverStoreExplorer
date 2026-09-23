@@ -308,7 +308,7 @@ try {
             $driverSize = [int64]-1
 
             if ($originalFileName) {
-                $driverFolder = Split-Path -LiteralPath $originalFileName -Parent
+                $driverFolder = [System.IO.Path]::GetDirectoryName($originalFileName)
 
                 if ($driverFolder -and (Test-Path -LiteralPath $driverFolder)) {
                     try {
