@@ -10,9 +10,9 @@ using Newtonsoft.Json;
 namespace Rapr.Utils
 {
     /// <summary>
-    /// Read-only driver store backed by PowerShell remoting.
-    /// The Driver Store Explorer process itself does not require elevation.
-    /// Permissions are evaluated on the remote computer by the PowerShell remoting endpoint.
+    /// Driver store backed by PowerShell remoting.
+    /// The local Driver Store Explorer process can run unelevated. Administrative
+    /// permissions for write operations are checked inside the remote session.
     /// </summary>
     public sealed class RemoteDriverStore : IDriverStore
     {
@@ -30,19 +30,19 @@ namespace Rapr.Utils
 
         public DriverStoreType Type => DriverStoreType.Remote;
 
-        // IDriverStore predates the remote store. Expose the target here so existing
-        // title/status plumbing can still display a useful location.
+        // IDriverStore predates remote stores. Reuse this property for the target
+        // name so the existing title/status plumbing can display the location.
         public string OfflineStoreLocation => this.ComputerName;
 
-        public bool SupportAddInstall => false;
+        public bool SupportAddInstall => true;
 
-        public bool SupportForceDeletion => false;
+        public bool SupportForceDeletion => true;
 
         public bool SupportDeviceNameColumn => true;
 
         public bool SupportExportDriver => false;
 
-        public bool SupportExportAllDrivers => false;
+        public bool SupportExportAllDrivers => true;
 
         public List<DriverStoreEntry> EnumeratePackages()
         {
@@ -98,35 +98,185 @@ namespace Rapr.Utils
 
         public bool DeleteDriver(DriverStoreEntry driverStoreEntry, bool forceDelete)
         {
-            throw new NotSupportedException("The remote driver store is read-only.");
+            if (driverStoreEntry == null)
+            {
+                throw new ArgumentNullException(nameof(driverStoreEntry));
+            }
+
+            if (string.IsNullOrWhiteSpace(driverStoreEntry.DriverPublishedName))
+            {
+                throw new ArgumentException("The driver package has no published INF name.", nameof(driverStoreEntry));
+            }
+
+            string publishedName = EscapePowerShellSingleQuotedString(driverStoreEntry.DriverPublishedName);
+            string forceArgument = forceDelete ? " /uninstall /force" : string.Empty;
+
+            string script = this.CreateSessionPrefix() + @"
+try {
+    Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+        param($publishedName, $force)
+
+        Assert-RemoteAdministrator
+
+        $arguments = @('/delete-driver', $publishedName)
+        if ($force) {
+            $arguments += '/uninstall'
+            $arguments += '/force'
+        }
+
+        $output = & pnputil.exe @arguments 2>&1
+        $exitCode = $LASTEXITCODE
+
+        if ($exitCode -ne 0) {
+            throw ('PnPUtil failed with exit code {0}: {1}' -f $exitCode, ($output -join [Environment]::NewLine))
+        }
+    } -ArgumentList '" + publishedName + @"', $" + (forceDelete ? "true" : "false") + @"
+}
+finally {
+    if ($session) {
+        Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+    }
+}
+";
+
+            this.RunPowerShell(script);
+            return true;
         }
 
         public bool AddDriver(string infFullPath, bool install)
         {
-            throw new NotSupportedException("The remote driver store is read-only.");
+            if (string.IsNullOrWhiteSpace(infFullPath))
+            {
+                throw new ArgumentException("An INF path is required.", nameof(infFullPath));
+            }
+
+            string fullInfPath = Path.GetFullPath(infFullPath);
+            if (!File.Exists(fullInfPath))
+            {
+                throw new FileNotFoundException("The selected INF file does not exist.", fullInfPath);
+            }
+
+            string sourceFolder = Path.GetDirectoryName(fullInfPath);
+            string infFileName = Path.GetFileName(fullInfPath);
+
+            string escapedSourceFolder = EscapePowerShellSingleQuotedString(sourceFolder);
+            string escapedInfFileName = EscapePowerShellSingleQuotedString(infFileName);
+
+            string script = this.CreateSessionPrefix() + @"
+$remoteStage = $null
+try {
+    Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+        Assert-RemoteAdministrator
+    }
+
+    $remoteStage = Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+        $path = Join-Path $env:TEMP ('DriverStoreExplorer-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+        $path
+    }
+
+    $sourceFolder = '" + escapedSourceFolder + @"'
+    Get-ChildItem -LiteralPath $sourceFolder -Force -ErrorAction Stop |
+        Copy-Item -Destination $remoteStage -ToSession $session -Recurse -Force -ErrorAction Stop
+
+    Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+        param($stage, $infFileName, $install)
+
+        Assert-RemoteAdministrator
+
+        $remoteInf = Join-Path $stage $infFileName
+        if (-not (Test-Path -LiteralPath $remoteInf -PathType Leaf)) {
+            throw ('The staged INF file was not found: ' + $remoteInf)
+        }
+
+        $arguments = @('/add-driver', $remoteInf)
+        if ($install) {
+            $arguments += '/install'
+        }
+
+        $output = & pnputil.exe @arguments 2>&1
+        $exitCode = $LASTEXITCODE
+
+        if ($exitCode -ne 0) {
+            throw ('PnPUtil failed with exit code {0}: {1}' -f $exitCode, ($output -join [Environment]::NewLine))
+        }
+    } -ArgumentList $remoteStage, '" + escapedInfFileName + @"', $" + (install ? "true" : "false") + @"
+}
+finally {
+    if ($session) {
+        if ($remoteStage) {
+            Invoke-Command -Session $session -ScriptBlock {
+                param($path)
+                Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+            } -ArgumentList $remoteStage -ErrorAction SilentlyContinue
+        }
+
+        Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+    }
+}
+";
+
+            this.RunPowerShell(script);
+            return true;
         }
 
         public bool ExportDriver(string infName, string destinationPath)
         {
-            throw new NotSupportedException("The remote driver store is read-only.");
+            throw new NotSupportedException("Exporting a single driver from a remote store is not supported.");
         }
 
         public bool ExportAllDrivers(string destinationPath)
         {
-            throw new NotSupportedException("The remote driver store is read-only.");
+            if (string.IsNullOrWhiteSpace(destinationPath))
+            {
+                throw new ArgumentException("A destination path is required.", nameof(destinationPath));
+            }
+
+            Directory.CreateDirectory(destinationPath);
+
+            string escapedDestination = EscapePowerShellSingleQuotedString(Path.GetFullPath(destinationPath));
+
+            string script = this.CreateSessionPrefix() + @"
+$remoteStage = $null
+try {
+    Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+        Assert-RemoteAdministrator
+    }
+
+    $remoteStage = Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+        $path = Join-Path $env:TEMP ('DriverStoreExplorer-Export-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+        Export-WindowsDriver -Online -Destination $path -ErrorAction Stop | Out-Null
+        $path
+    }
+
+    $destination = '" + escapedDestination + @"'
+    Get-ChildItem -Path (Join-Path $remoteStage '*') -FromSession $session -Force -ErrorAction Stop |
+        Copy-Item -Destination $destination -Recurse -Force -ErrorAction Stop
+}
+finally {
+    if ($session) {
+        if ($remoteStage) {
+            Invoke-Command -Session $session -ScriptBlock {
+                param($path)
+                Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+            } -ArgumentList $remoteStage -ErrorAction SilentlyContinue
+        }
+
+        Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+    }
+}
+";
+
+            this.RunPowerShell(script);
+            return true;
         }
 
         private string RunRemoteInventory()
         {
-            string escapedComputerName = this.ComputerName.Replace("'", "''");
-
-            string script = @"
-$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$computerName = '" + escapedComputerName + @"'
-
+            string script = this.CreateSessionPrefix() + @"
 try {
-    $items = Invoke-Command -ComputerName $computerName -ErrorAction Stop -ScriptBlock {
+    $items = Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
         $ErrorActionPreference = 'Stop'
 
         $deviceDrivers = @()
@@ -227,12 +377,40 @@ try {
 
     ConvertTo-Json -InputObject @($items) -Depth 4 -Compress
 }
-catch {
-    [Console]::Error.WriteLine($_.Exception.Message)
-    exit 1
+finally {
+    if ($session) {
+        Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+    }
 }
 ";
 
+            return this.RunPowerShell(script).Trim();
+        }
+
+        private string CreateSessionPrefix()
+        {
+            string escapedComputerName = EscapePowerShellSingleQuotedString(this.ComputerName);
+
+            return @"
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+
+function Assert-RemoteAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'The PowerShell remoting session does not have administrator rights on the target computer.'
+    }
+}
+
+$session = $null
+$session = New-PSSession -ComputerName '" + escapedComputerName + @"' -ErrorAction Stop
+";
+        }
+
+        private string RunPowerShell(string script)
+        {
             string encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
 
             ProcessStartInfo startInfo = new ProcessStartInfo
@@ -248,7 +426,7 @@ catch {
                 StandardErrorEncoding = Encoding.UTF8,
             };
 
-            Trace.TraceInformation($"Reading remote driver store from {this.ComputerName}");
+            Trace.TraceInformation($"Executing remote driver store operation on {this.ComputerName}");
 
             try
             {
@@ -270,10 +448,10 @@ catch {
                             : error.Trim();
 
                         throw new InvalidOperationException(
-                            $"Unable to read the driver store from '{this.ComputerName}'. {detail}");
+                            $"Remote operation on '{this.ComputerName}' failed. {detail}");
                     }
 
-                    return output.Trim();
+                    return output;
                 }
             }
             catch (Exception ex) when (
@@ -284,6 +462,11 @@ catch {
                 Trace.TraceError(ex.ToString());
                 throw;
             }
+        }
+
+        private static string EscapePowerShellSingleQuotedString(string value)
+        {
+            return (value ?? string.Empty).Replace("'", "''");
         }
 
         private sealed class RemoteDriverInfo
