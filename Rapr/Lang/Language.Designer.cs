@@ -435,6 +435,15 @@ namespace Rapr.Lang {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Remote Computer.
+        /// </summary>
+        public static string DriverStore_RemoteMachine {
+            get {
+                return ResourceManager.GetString("DriverStore_RemoteMachine", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Offline Driver Store.
         /// </summary>
         public static string DriverStore_Offline {

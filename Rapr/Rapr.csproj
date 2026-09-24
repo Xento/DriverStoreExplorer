@@ -114,6 +114,7 @@
     <Compile Include="Utils\IDriverStore.cs" />
     <Compile Include="Utils\DismUtil.cs" />
     <Compile Include="Utils\PnpUtil.cs" />
+    <Compile Include="Utils\RemoteDriverStore.cs" />
     <Compile Include="MyObjectListView.cs">
       <SubType>Component</SubType>
     </Compile>

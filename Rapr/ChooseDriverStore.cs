@@ -24,10 +24,12 @@ namespace Rapr
             {
                 this.storeType = value;
                 this.NotifyPropertyChanged(nameof(this.StoreType));
+                this.NotifyPropertyChanged(nameof(this.OKButtonEnable));
             }
         }
 
         private string offlineStoreLocation;
+        private string remoteComputerName;
 
         public string OfflineStoreLocation
         {
@@ -42,12 +44,27 @@ namespace Rapr
             }
         }
 
+        public string RemoteComputerName
+        {
+            get
+            {
+                return this.remoteComputerName;
+            }
+            set
+            {
+                this.remoteComputerName = value;
+                this.NotifyPropertyChanged(nameof(this.RemoteComputerName));
+                this.NotifyPropertyChanged(nameof(this.OKButtonEnable));
+            }
+        }
+
         public bool OKButtonEnable
         {
             get
             {
                 return this.StoreType == DriverStoreType.Online
-                    || !string.IsNullOrEmpty(this.OfflineStoreLocation);
+                    || (this.StoreType == DriverStoreType.Offline && !string.IsNullOrWhiteSpace(this.OfflineStoreLocation))
+                    || (this.StoreType == DriverStoreType.Remote && !string.IsNullOrWhiteSpace(this.RemoteComputerName));
             }
         }
 
@@ -56,6 +73,7 @@ namespace Rapr
             this.InitializeComponent();
             AddRadioCheckedBinding(this.radioButtonDriverStoreOnline, this, nameof(this.StoreType), DriverStoreType.Online);
             AddRadioCheckedBinding(this.radioButtonDriverStoreOffline, this, nameof(this.StoreType), DriverStoreType.Offline);
+            AddRadioCheckedBinding(this.radioButtonDriverStoreRemote, this, nameof(this.StoreType), DriverStoreType.Remote);
 
             this.textBoxOfflineStoreLocation.DataBindings.Add(
                 nameof(this.textBoxOfflineStoreLocation.Enabled),
@@ -71,6 +89,18 @@ namespace Rapr
                 nameof(this.buttonBrowseLocation.Enabled),
                 this.radioButtonDriverStoreOffline,
                 nameof(this.radioButtonDriverStoreOffline.Checked));
+
+            this.textBoxRemoteComputer.DataBindings.Add(
+                nameof(this.textBoxRemoteComputer.Enabled),
+                this.radioButtonDriverStoreRemote,
+                nameof(this.radioButtonDriverStoreRemote.Checked));
+
+            this.textBoxRemoteComputer.DataBindings.Add(
+                nameof(this.textBoxRemoteComputer.Text),
+                this,
+                nameof(this.RemoteComputerName),
+                false,
+                DataSourceUpdateMode.OnPropertyChanged);
 
             this.buttonOK.DataBindings.Add(
                 nameof(this.buttonOK.Enabled),
